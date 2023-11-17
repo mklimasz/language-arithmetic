@@ -20,6 +20,7 @@ from random import randint
 from typing import Any, Callable, Dict, List, NewType, Optional, Tuple, Union
 
 import numpy as np
+import torch
 
 from ..models.bert import BertTokenizer, BertTokenizerFast
 from ..tokenization_utils_base import PreTrainedTokenizerBase
@@ -639,6 +640,8 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
     pad_to_multiple_of: Optional[int] = None
     tf_experimental_compile: bool = False
     return_tensors: str = "pt"
+    train_generator: torch.Generator = torch.Generator()
+    generator: torch.Generator = train_generator
 
     def __post_init__(self):
         if self.mlm and self.tokenizer.mask_token is None:
@@ -649,7 +652,15 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
         if self.tf_experimental_compile:
             import tensorflow as tf
 
-            self.tf_mask_tokens = tf.function(self.tf_mask_tokens, jit_compile=True)
+            self.tf_mask_tkens = tf.function(self.tf_mask_tokens, jit_compile=True)
+
+    # Source: https://github.com/cambridgeltl/composable-sft/blob/main/src/sft/utils.py
+    def train(self):
+        self.generator = self.train_generator
+
+    def eval(self):
+        self.generator = torch.Generator()
+        self.generator.manual_seed(2147483647)
 
     @staticmethod
     def tf_bernoulli(shape, probability):
@@ -765,16 +776,16 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
             special_tokens_mask = special_tokens_mask.bool()
 
         probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
-        masked_indices = torch.bernoulli(probability_matrix).bool()
+        masked_indices = torch.bernoulli(probability_matrix, generator=self.generator).bool()
         labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
         # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-        indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
+        indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8), generator=self.generator).bool() & masked_indices
         inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
 
         # 10% of the time, we replace masked input tokens with random word
-        indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-        random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
+        indices_random = torch.bernoulli(torch.full(labels.shape, 0.5), generator=self.generator).bool() & masked_indices & ~indices_replaced
+        random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long, generator=self.generator)
         inputs[indices_random] = random_words[indices_random]
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged

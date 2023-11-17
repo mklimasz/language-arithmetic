@@ -32,7 +32,8 @@ from typing import Optional
 import datasets
 from datasets import load_dataset
 
-import evaluate
+from sklearn.metrics import accuracy_score
+
 import transformers
 from transformers import (
     CONFIG_MAPPING,
@@ -117,6 +118,10 @@ class ModelArguments:
             )
         },
     )
+    adapter_name: Optional[str] = field(
+        default="mlm",
+        metadata={"help": "The trained adapter name."},
+    )
 
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
@@ -145,7 +150,7 @@ class DataTrainingArguments:
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
-    validation_split_percentage: Optional[int] = field(
+    validation_subset: Optional[int] = field(
         default=5,
         metadata={
             "help": "The percentage of the train set used as validation set in case there's no validation split"
@@ -180,12 +185,11 @@ class DataTrainingArguments:
             )
         },
     )
-    max_train_samples: Optional[int] = field(
+    max_train_tokens: Optional[int] = field(
         default=None,
         metadata={
             "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
+                "Limit dataset to max train tokens"
             )
         },
     )
@@ -205,12 +209,12 @@ class DataTrainingArguments:
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
-                if extension not in ["csv", "json", "txt"]:
-                    raise ValueError("`train_file` should be a csv, a json or a txt file.")
+                if extension not in ["csv", "json", "txt", "arrow"]:
+                    raise ValueError("`train_file` should be a csv, a json, an arrow or a txt file.")
             if self.validation_file is not None:
                 extension = self.validation_file.split(".")[-1]
-                if extension not in ["csv", "json", "txt"]:
-                    raise ValueError("`validation_file` should be a csv, a json or a txt file.")
+                if extension not in ["csv", "json", "txt", "arrow"]:
+                    raise ValueError("`validation_file` should be a csv, a json, an arrow or a txt file.")
 
 
 def main():
@@ -285,54 +289,58 @@ def main():
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
         )
+        raw_datasets = raw_datasets.shuffle(seed=training_args.seed)
+
         if "validation" not in raw_datasets.keys():
             raw_datasets["validation"] = load_dataset(
                 data_args.dataset_name,
                 data_args.dataset_config_name,
-                split=f"train[:{data_args.validation_split_percentage}%]",
+                split=f"train[:{data_args.validation_subset}]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
             )
             raw_datasets["train"] = load_dataset(
                 data_args.dataset_name,
                 data_args.dataset_config_name,
-                split=f"train[{data_args.validation_split_percentage}%:]",
+                split=f"train[{data_args.validation_subset}:]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
             )
     else:
-        data_files = {}
-        if data_args.train_file is not None:
-            data_files["train"] = data_args.train_file
-            extension = data_args.train_file.split(".")[-1]
-        if data_args.validation_file is not None:
-            data_files["validation"] = data_args.validation_file
-            extension = data_args.validation_file.split(".")[-1]
-        if extension == "txt":
-            extension = "text"
-        raw_datasets = load_dataset(
-            extension,
-            data_files=data_files,
-            cache_dir=model_args.cache_dir,
-            use_auth_token=True if model_args.use_auth_token else None,
-        )
-
-        # If no validation data is there, validation_split_percentage will be used to divide the dataset.
-        if "validation" not in raw_datasets.keys():
-            raw_datasets["validation"] = load_dataset(
-                extension,
-                data_files=data_files,
-                split=f"train[:{data_args.validation_split_percentage}%]",
-                cache_dir=model_args.cache_dir,
-                use_auth_token=True if model_args.use_auth_token else None,
-            )
-            raw_datasets["train"] = load_dataset(
-                extension,
-                data_files=data_files,
-                split=f"train[{data_args.validation_split_percentage}%:]",
-                cache_dir=model_args.cache_dir,
-                use_auth_token=True if model_args.use_auth_token else None,
-            )
+        assert False
+    # else:
+    #     data_files = {}
+    #     if data_args.train_file is not None:
+    #         data_files["train"] = data_args.train_file
+    #         extension = data_args.train_file.split(".")[-1]
+    #     if data_args.validation_file is not None:
+    #         data_files["validation"] = data_args.validation_file
+    #         extension = data_args.validation_file.split(".")[-1]
+    #     if extension == "txt":
+    #         extension = "text"
+    #     raw_datasets = load_dataset(
+    #         extension,
+    #         data_files=data_files,
+    #         cache_dir=model_args.cache_dir,
+    #         use_auth_token=True if model_args.use_auth_token else None,
+    #     )
+    #
+    #     # If no validation data is there, validation_subset will be used to divide the dataset.
+    #     if "validation" not in raw_datasets.keys():
+    #         raw_datasets["validation"] = load_dataset(
+    #             extension,
+    #             data_files=data_files,
+    #             split=f"train[:{data_args.validation_subset}]",
+    #             cache_dir=model_args.cache_dir,
+    #             use_auth_token=True if model_args.use_auth_token else None,
+    #         )
+    #         raw_datasets["train"] = load_dataset(
+    #             extension,
+    #             data_files=data_files,
+    #             split=f"train[{data_args.validation_subset}:]",
+    #             cache_dir=model_args.cache_dir,
+    #             use_auth_token=True if model_args.use_auth_token else None,
+    #         )
 
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
@@ -495,20 +503,29 @@ def main():
                 load_from_cache_file=not data_args.overwrite_cache,
                 desc=f"Grouping texts in chunks of {max_seq_length}",
             )
+            logger.info("Post grouping")
+            logger.info(str(tokenized_datasets))
 
     if training_args.do_train:
         if "train" not in tokenized_datasets:
             raise ValueError("--do_train requires a train dataset")
         train_dataset = tokenized_datasets["train"]
-        if data_args.max_train_samples is not None:
-            max_train_samples = min(len(train_dataset), data_args.max_train_samples)
-            train_dataset = train_dataset.select(range(max_train_samples))
+        if data_args.max_train_tokens is not None and data_args.max_train_tokens > 0:
+            assert data_args.max_train_tokens < max_seq_length * len(train_dataset), \
+                (max_seq_length, len(train_dataset))
+            max_samples = int(math.ceil(data_args.max_train_tokens / max_seq_length))
+            train_dataset = train_dataset.select(range(max_samples))
+
+            # assert data_args.max_train_samples < len(train_dataset), len(train_dataset)
+            # max_train_samples = min(len(train_dataset), data_args.max_train_samples)
+            # train_dataset = train_dataset.select(range(max_train_samples))
 
     if training_args.do_eval:
         if "validation" not in tokenized_datasets:
             raise ValueError("--do_eval requires a validation dataset")
         eval_dataset = tokenized_datasets["validation"]
         if data_args.max_eval_samples is not None:
+            assert data_args.max_eval_samples < len(eval_dataset), len(eval_dataset)
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
 
@@ -519,8 +536,6 @@ def main():
                 logits = logits[0]
             return logits.argmax(dim=-1)
 
-        metric = evaluate.load("accuracy")
-
         def compute_metrics(eval_preds):
             preds, labels = eval_preds
             # preds have the same shape as the labels, after the argmax(-1) has been calculated
@@ -530,7 +545,7 @@ def main():
             mask = labels != -100
             labels = labels[mask]
             preds = preds[mask]
-            return metric.compute(predictions=preds, references=labels)
+            return {"accuracy": accuracy_score(labels, preds)}
 
     # Data collator
     # This one will take care of randomly masking the tokens.
@@ -542,7 +557,11 @@ def main():
     )
 
     # Setup adapters
-    setup_adapter_training(model, adapter_args, data_args.dataset_name or "mlm")
+    setup_adapter_training(model, adapter_args, model_args.adapter_name)
+    print(model)
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print("Trainable:", name)
     # Initialize our Trainer
     trainer_class = AdapterTrainer if adapter_args.train_adapter else Trainer
     trainer = trainer_class(
@@ -569,10 +588,10 @@ def main():
         trainer.save_model()  # Saves the tokenizer too for easy upload
         metrics = train_result.metrics
 
-        max_train_samples = (
-            data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
-        )
-        metrics["train_samples"] = min(max_train_samples, len(train_dataset))
+        # max_train_samples = (
+        #     data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+        # )
+        metrics["train_samples"] = len(train_dataset)
 
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)

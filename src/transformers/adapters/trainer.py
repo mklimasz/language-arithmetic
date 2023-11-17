@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.utils.data.dataset import Dataset
 
-from transformers import PreTrainedModel, Seq2SeqTrainer, Trainer, __version__
+from transformers import PreTrainedModel, Seq2SeqTrainer, Trainer, __version__, DataCollatorForLanguageModeling
 from transformers.adapters.composition import AdapterCompositionBlock, Fuse
 from transformers.dependency_versions_check import dep_version_check
 from transformers.integrations import is_fairscale_available
@@ -88,6 +88,14 @@ class AdapterTrainer(Trainer):
             for head in self.model._active_heads:
                 all_label_names |= set(self.model.heads[head].get_label_names())
             self.label_names = list(all_label_names)
+
+    def evaluate(self, *args, **kwargs):
+        if isinstance(self.data_collator, DataCollatorForLanguageModeling):
+            self.data_collator.eval()
+        output = super().evaluate(*args, **kwargs)
+        if isinstance(self.data_collator, DataCollatorForLanguageModeling):
+            self.data_collator.train()
+        return output
 
     def create_optimizer(self):
         """

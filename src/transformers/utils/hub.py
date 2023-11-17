@@ -71,11 +71,13 @@ def is_offline_mode():
     return _is_offline_mode
 
 
-torch_cache_home = os.getenv("TORCH_HOME", os.path.join(os.getenv("XDG_CACHE_HOME", "~/.cache"), "torch"))
+user_home = os.getenv("HOME")
+default_cache = os.path.join(user_home, ".cache")
+torch_cache_home = os.getenv("TORCH_HOME", os.path.join(os.getenv("XDG_CACHE_HOME", default_cache), "torch"))
 old_default_cache_path = os.path.join(torch_cache_home, "transformers")
 # New default cache, shared with the Datasets library
 hf_cache_home = os.path.expanduser(
-    os.getenv("HF_HOME", os.path.join(os.getenv("XDG_CACHE_HOME", "~/.cache"), "huggingface"))
+    os.getenv("HF_HOME", os.path.join(os.getenv("XDG_CACHE_HOME", default_cache), "huggingface"))
 )
 default_cache_path = os.path.join(hf_cache_home, "hub")
 

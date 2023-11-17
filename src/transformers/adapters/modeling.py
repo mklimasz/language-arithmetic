@@ -219,10 +219,12 @@ class Adapter(nn.Module):
     # This is copied from the BertPreTrainedModel class to make this a self containing class.
     @staticmethod
     def init_bert_weights(module):
+        generator = torch.Generator()
+        generator.manual_seed(2147483647)
         """Initialize the weights."""
         if isinstance(module, (nn.Linear, nn.Embedding)):
             # std defaults to 0.02, this might need to be changed
-            module.weight.data.normal_(mean=0.0, std=0.02)
+            module.weight.data.normal_(mean=0.0, std=0.02, generator=generator)
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
@@ -410,9 +412,9 @@ class BertFusion(nn.Module):
 def get_subnet_constructor(non_linearity, reduction_factor):
     def subnet(dims_in, dims_out):
         return nn.Sequential(
-            nn.Linear(dims_in, int(dims_in // reduction_factor)),
+            nn.Linear(dims_in, int(dims_in // reduction_factor)).apply(Adapter.init_bert_weights),
             Activation_Function_Class(non_linearity),
-            nn.Linear(int(dims_in // reduction_factor), dims_out),
+            nn.Linear(int(dims_in // reduction_factor), dims_out).apply(Adapter.init_bert_weights),
         )
 
     return subnet
