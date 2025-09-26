@@ -436,7 +436,7 @@ setup(
     author="Jonas Pfeiffer, Andreas Rücklé, Clifton Poth, Hannah Sterz, Leon Engländer, based on work by the HuggingFace team and community",
     author_email="pfeiffer@ukp.tu-darmstadt.de",
     description="A friendly fork of HuggingFace's Transformers, adding Adapters to PyTorch language models",
-    long_description=open("README.md", "r", encoding="utf-8").read(),
+    long_description=open("README.adapters.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     keywords="NLP deep learning transformer pytorch BERT adapters",
     license="Apache",
